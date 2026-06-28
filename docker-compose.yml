@@ -1,0 +1,105 @@
+version: "3.9"
+
+services:
+  # ─── Base de datos PostgreSQL ───────────────────────────────────────
+  postgres:
+    image: postgres:15-alpine
+    container_name: labtrack_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: labtrack_db
+      POSTGRES_USER: labtrack_user
+      POSTGRES_PASSWORD: labtrack_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/src/database/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - labtrack_net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U labtrack_user -d labtrack_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Redis (caché + colas) ──────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: labtrack_redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass redis_pass
+    volumes:
+      - redis_data:/data
+    networks:
+      - labtrack_net
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis_pass", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─── Backend API (Node.js + Express) ────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: labtrack_backend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: labtrack_db
+      DB_USER: labtrack_user
+      DB_PASS: labtrack_pass
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASS: redis_pass
+      JWT_SECRET: labtrack_jwt_secret_2024_secure
+      JWT_EXPIRES_IN: 8h
+    volumes:
+      - ./backend/logs:/app/logs
+      - uploads_data:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - labtrack_net
+
+  # ─── Frontend (React + Vite) ─────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: labtrack_frontend
+    restart: unless-stopped
+    networks:
+      - labtrack_net
+    depends_on:
+      - backend
+
+  # ─── Nginx Reverse Proxy ─────────────────────────────────────────────
+  nginx:
+    image: nginx:alpine
+    container_name: labtrack_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - labtrack_net
+
+volumes:
+  postgres_data:
+  redis_data:
+  uploads_data:
+
+networks:
+  labtrack_net:
+    driver: bridge
