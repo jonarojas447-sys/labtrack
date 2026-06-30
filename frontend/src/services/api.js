@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const api = axios.create({
-  baseURL: 'https://labtrack-production-33d5.up.railway.app/api',
+  baseURL: 'https://labtrack-backend-7fbs.onrender.com/api',
   timeout: 60000,
   headers: { 'Content-Type': 'application/json' },
 });
